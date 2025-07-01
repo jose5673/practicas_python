@@ -349,3 +349,4 @@ A lo largo de todas las fases, mantendremos el aprendizaje paralelo de VS Code:
  [OK] cd "c:\Users\Jose\OneDrive\Documents\practicas_python"
  [OK] git status
 
+siempre con el uso de señales visuales o iconografía
