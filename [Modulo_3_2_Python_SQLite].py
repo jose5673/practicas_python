@@ -538,189 +538,408 @@ class SistemaMonitoreoIndustrial:
             }
 
 """
-6. PATRONES AVANZADOS
-====================
+6. INTEGRACIÓN CON PANDAS PARA ANÁLISIS HÍBRIDO
+=================================================================
 
-Implementación de patrones de diseño profesionales para
-aplicaciones industriales robustas.
+"""
+La integración de SQLite con Pandas es fundamental para análisis
+de datos industriales. Pandas puede leer directamente desde SQLite
+y también escribir DataFrames a la base de datos.
 """
 
-class ConnectionPool:
-    """Pool de conexiones para alta concurrencia"""
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from datetime import datetime, timedelta
+import numpy as np
+
+def demo_pandas_sqlite():
+    """Demostración completa de integración Pandas + SQLite"""
     
-    def __init__(self, db_path: str, max_connections: int = 10):
-        self.db_path = db_path
-        self.max_connections = max_connections
-        self._pool = []
-        self._in_use = set()
-    
-    def get_connection(self):
-        """Obtiene conexión del pool"""
-        if self._pool:
-            conn = self._pool.pop()
-        else:
-            conn = sqlite3.connect(self.db_path)
-            conn.row_factory = sqlite3.Row
+    # 1. LECTURA DIRECTA CON PANDAS
+    with get_db_connection() as conn:
+        # Leer datos de sensores con JOIN
+        query_sensores = """
+        SELECT 
+            s.nombre as sensor,
+            s.tipo,
+            s.ubicacion,
+            l.valor,
+            l.timestamp,
+            l.calidad
+        FROM sensores s
+        JOIN lecturas l ON s.id = l.sensor_id
+        ORDER BY l.timestamp DESC
+        """
         
-        self._in_use.add(conn)
-        return conn
-    
-    def return_connection(self, conn):
-        """Devuelve conexión al pool"""
-        if conn in self._in_use:
-            self._in_use.remove(conn)
-            if len(self._pool) < self.max_connections:
-                self._pool.append(conn)
-            else:
-                conn.close()
-    
-    def close_all(self):
-        """Cierra todas las conexiones"""
-        for conn in self._pool + list(self._in_use):
-            conn.close()
-        self._pool.clear()
-        self._in_use.clear()
-
-"""
-7. AUTOMATIZACIÓN Y SCHEDULING
-==============================
-
-Herramientas para automatizar tareas de base de datos
-y generar reportes programados.
-"""
-
-class AutomacionReportes:
-    """Sistema de automatización de reportes"""
-    
-    def __init__(self, sistema_monitoreo: SistemaMonitoreoIndustrial):
-        self.sistema = sistema_monitoreo
-    
-    def backup_diario(self, directorio_backup: str):
-        """Realiza backup diario de la base de datos"""
-        from shutil import copy2
-        fecha = datetime.now().strftime('%Y%m%d')
-        backup_path = Path(directorio_backup) / f"backup_{fecha}.db"
-        copy2(self.sistema.db_path, backup_path)
-        return backup_path
-    
-    def limpieza_datos_antiguos(self, dias_retention: int = 90):
-        """Limpia datos antiguos para optimizar rendimiento"""
-        with obtener_conexion(self.sistema.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                DELETE FROM lecturas 
-                WHERE timestamp < date('now', '-{} days')
-            """.format(dias_retention))
+        df_lecturas = pd.read_sql_query(query_sensores, conn)
+        
+        print(f"📈 DataFrame cargado: {len(df_lecturas)} registros")
+        print("\n🔍 Primeras 5 filas:")
+        print(df_lecturas.head())
+        
+        # 2. ANÁLISIS ESTADÍSTICO
+        print("\n📊 Estadísticas por tipo de sensor:")
+        stats_por_tipo = df_lecturas.groupby('tipo')['valor'].agg([
+            'count', 'mean', 'std', 'min', 'max'
+        ]).round(2)
+        print(stats_por_tipo)
+        
+        # 3. DETECCIÓN DE VALORES ATÍPICOS
+        print("\n🚨 Detección de valores atípicos:")
+        for tipo in df_lecturas['tipo'].unique():
+            datos_tipo = df_lecturas[df_lecturas['tipo'] == tipo]['valor']
+            Q1 = datos_tipo.quantile(0.25)
+            Q3 = datos_tipo.quantile(0.75)
+            IQR = Q3 - Q1
             
-            registros_eliminados = cursor.rowcount
-            conn.commit()
-            return registros_eliminados
-    
-    def generar_reporte_semanal(self) -> Dict[str, Any]:
-        """Genera reporte semanal consolidado"""
-        # Implementación del reporte semanal
-        pass
-    
-    def enviar_notificacion_email(self, destinatarios: List[str], reporte: Dict):
-        """Envía reporte por email (simulado)"""
-        # En implementación real usarías smtplib
-        print(f"📧 Enviando reporte a {destinatarios}")
-        print(f"📊 Datos del reporte: {len(reporte)} elementos")
+            outliers = datos_tipo[
+                (datos_tipo < Q1 - 1.5 * IQR) | 
+                (datos_tipo > Q3 + 1.5 * IQR)
+            ]
+            
+            print(f"    {tipo}: {len(outliers)} valores atípicos")
+        
+        return df_lecturas
 
 """
-8. MEJORES PRÁCTICAS Y PATRONES
-===============================
-
-Implementación de mejores prácticas para aplicaciones
-industriales de misión crítica.
-"""
-
-# Configuración de logging
-import logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-
-class SeguridadBaseDatos:
-    """Implementa medidas de seguridad para BD industriales"""
-    
-    @staticmethod
-    def validar_sql_injection(query: str) -> bool:
-        """Valida contra inyección SQL básica"""
-        palabras_peligrosas = ['DROP', 'DELETE', 'UPDATE', 'INSERT', 'ALTER']
-        query_upper = query.upper()
-        return not any(palabra in query_upper for palabra in palabras_peligrosas)
-    
-    @staticmethod
-    def encriptar_datos_sensibles(data: str) -> str:
-        """Encripta datos sensibles (implementación básica)"""
-        import base64
-        return base64.b64encode(data.encode()).decode()
-    
-    @staticmethod
-    def audit_log(usuario: str, accion: str, tabla: str):
-        """Registra auditoría de operaciones"""
-        logging.info(f"AUDIT: {usuario} realizó {accion} en {tabla}")
-
-"""
-=================================================================
-RESUMEN DEL MÓDULO 3.2
+7. GENERACIÓN AUTOMÁTICA DE REPORTES
 =================================================================
 
-✅ CONCEPTOS DOMINADOS:
-- Conexión Python-SQLite con sqlite3
-- Context managers para manejo seguro
-- Patrones DAO y Repository
-- Integración Pandas + SQL
-- Automatización de reportes
-- Pool de conexiones
-- Seguridad básica de BD
-- Monitoreo industrial en tiempo real
-
-🎯 PRÓXIMO MÓDULO 3.3: CONSULTAS AVANZADAS Y OPTIMIZACIÓN
-- Stored procedures en SQLite
-- Triggers para automatización
-- Views complejas y materializadas
-- Optimización avanzada de consultas
-- Análisis de performance
-- Índices especializados
-
-💡 APLICACIONES INDUSTRIALES DESARROLLADAS:
-- Sistema de monitoreo de sensores
-- Dashboard en tiempo real
-- Automatización de reportes
-- Gestión de empleados con DAO
-- Pool de conexiones para alta concurrencia
+"""
+Los reportes automáticos son cruciales en sistemas industriales.
+Python permite generar reportes complejos combinando datos SQL
+con análisis estadístico y exportación a múltiples formatos.
 """
 
-# Ejemplo de uso completo del sistema
-if __name__ == "__main__":
-    # Configuración del sistema
-    sistema = SistemaMonitoreoIndustrial("planta_industrial.db")
+def generar_reporte_operacional():
+    """Genera un reporte operacional completo del sistema industrial"""
     
-    # Registro de sensores
-    sensor_temp = {
-        'nombre': 'Temperatura Reactor 1',
-        'tipo': 'Temperatura',
-        'ubicacion': 'Planta Principal - Reactor 1',
-        'unidad_medida': '°C',
-        'valor_min': 20.0,
-        'valor_max': 80.0
+    with get_db_connection() as conn:
+        # Datos para el reporte
+        reporte_data = {}
+        
+        # 1. Estado general del sistema
+        query_resumen = """
+        SELECT 
+            COUNT(DISTINCT s.id) as total_sensores,
+            COUNT(DISTINCT s.id) FILTER (WHERE s.activo = 1) as sensores_activos,
+            COUNT(l.id) as total_lecturas,
+            COUNT(DISTINCT a.id) as total_alarmas,
+            COUNT(DISTINCT a.id) FILTER (WHERE a.reconocida = 0) as alarmas_pendientes
+        FROM sensores s
+        LEFT JOIN lecturas l ON s.id = l.sensor_id AND l.timestamp >= datetime('now', '-24 hours')
+        LEFT JOIN alarmas a ON s.id = a.sensor_id AND a.timestamp >= datetime('now', '-24 hours')
+        """
+        
+        resumen = pd.read_sql_query(query_resumen, conn).iloc[0]
+        reporte_data['resumen'] = resumen
+        
+        # 2. Top sensores con más lecturas
+        query_top_sensores = """
+        SELECT 
+            s.nombre,
+            s.tipo,
+            s.ubicacion,
+            COUNT(l.id) as num_lecturas,
+            AVG(l.valor) as valor_promedio,
+            MAX(l.timestamp) as ultima_lectura
+        FROM sensores s
+        JOIN lecturas l ON s.id = l.sensor_id
+        WHERE l.timestamp >= datetime('now', '-24 hours')
+        GROUP BY s.id, s.nombre, s.tipo, s.ubicacion
+        ORDER BY num_lecturas DESC
+        LIMIT 5
+        """
+        
+        top_sensores = pd.read_sql_query(query_top_sensores, conn)
+        reporte_data['top_sensores'] = top_sensores
+        
+        return reporte_data
+
+def exportar_reporte_excel(reporte_data, nombre_archivo="reporte_operacional.xlsx"):
+    """Exporta el reporte a un archivo Excel con múltiples hojas"""
+    
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    nombre_archivo = f"reporte_operacional_{timestamp}.xlsx"
+    
+    with pd.ExcelWriter(nombre_archivo, engine='openpyxl') as writer:
+        # Hoja 1: Resumen ejecutivo
+        df_resumen = pd.DataFrame([reporte_data['resumen']])
+        df_resumen.to_excel(writer, sheet_name='Resumen_Ejecutivo', index=False)
+        
+        # Hoja 2: Top sensores
+        reporte_data['top_sensores'].to_excel(writer, sheet_name='Top_Sensores', index=False)
+    
+    print(f"📄 Reporte exportado: {nombre_archivo}")
+    return nombre_archivo
+
+"""
+8. EJERCICIOS PRÁCTICOS PROGRESIVOS
+=================================================================
+
+"""
+Ejercicios diseñados para consolidar el aprendizaje de manera
+progresiva, desde conceptos básicos hasta implementaciones
+avanzadas de sistemas industriales completos.
+"""
+
+# NIVEL BÁSICO 🟢
+def ejercicio_basico_conexion():
+    """Ejercicio básico: Conexión y consultas simples"""
+    
+    print("🎯 EJERCICIO BÁSICO: Conexión y Consultas")
+    
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        
+        # Contar sensores
+        cursor.execute("SELECT COUNT(*) FROM sensores")
+        total_sensores = cursor.fetchone()[0]
+        print(f"📊 Total de sensores: {total_sensores}")
+        
+        # Listar sensores activos
+        cursor.execute("SELECT nombre, tipo, ubicacion FROM sensores WHERE activo = 1")
+        sensores_activos = cursor.fetchall()
+        print(f"✅ Sensores activos: {len(sensores_activos)}")
+
+# NIVEL INTERMEDIO 🟡
+def ejercicio_intermedio_pandas():
+    """Ejercicio intermedio: Análisis con Pandas"""
+    
+    print("🎯 EJERCICIO INTERMEDIO: Análisis con Pandas")
+    
+    with get_db_connection() as conn:
+        df = pd.read_sql_query("""
+            SELECT s.nombre, s.tipo, l.valor, l.timestamp
+            FROM sensores s
+            JOIN lecturas l ON s.id = l.sensor_id
+            WHERE l.timestamp >= datetime('now', '-24 hours')
+        """, conn)
+        
+        print(f"📊 Datos cargados: {len(df)} registros")
+        
+        # Análisis estadístico
+        stats = df.groupby('tipo')['valor'].agg(['count', 'mean', 'std']).round(2)
+        print("📈 Estadísticas por tipo:")
+        print(stats)
+
+# NIVEL AVANZADO 🔴
+def ejercicio_avanzado_dashboard():
+    """Ejercicio avanzado: Dashboard industrial completo"""
+    
+    print("🎯 EJERCICIO AVANZADO: Dashboard Industrial")
+    
+    class DashboardIndustrial:
+        """Sistema completo de dashboard industrial"""
+        
+        def __init__(self):
+            self.nombre_sistema = "SCADA Industrial v3.2"
+            self.fecha_inicio = datetime.now()
+        
+        def estado_general(self):
+            """Muestra el estado general del sistema"""
+            print(f"\n🏭 {self.nombre_sistema}")
+            print(f"📅 Sesión iniciada: {self.fecha_inicio.strftime('%Y-%m-%d %H:%M:%S')}")
+            
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute("SELECT COUNT(*) FROM sensores WHERE activo = 1")
+                sensores_activos = cursor.fetchone()[0]
+                
+                cursor.execute("SELECT COUNT(*) FROM lecturas WHERE timestamp >= datetime('now', '-1 hour')")
+                lecturas_hora = cursor.fetchone()[0]
+                
+                cursor.execute("SELECT COUNT(*) FROM alarmas WHERE reconocida = 0")
+                alarmas_pendientes = cursor.fetchone()[0]
+                
+                print(f"🟢 Sensores activos: {sensores_activos}")
+                print(f"📈 Lecturas (1h): {lecturas_hora}")
+                print(f"🚨 Alarmas pendientes: {alarmas_pendientes}")
+        
+        def generar_reporte_ejecutivo(self):
+            """Genera reporte ejecutivo completo"""
+            print("\n📋 REPORTE EJECUTIVO:")
+            
+            datos_reporte = generar_reporte_operacional()
+            
+            print(f"📊 Sistema: {self.nombre_sistema}")
+            print(f"✅ Estado: OPERACIONAL")
+            print(f"🕐 Generado: {datetime.now().isoformat()}")
+            
+            return datos_reporte
+    
+    # Ejecutar dashboard
+    dashboard = DashboardIndustrial()
+    dashboard.estado_general()
+    reporte = dashboard.generar_reporte_ejecutivo()
+    
+    return dashboard, reporte
+
+"""
+9. EVALUACIÓN Y CONSOLIDACIÓN
+=================================================================
+
+def cuestionario_evaluacion():
+    """Cuestionario de evaluación del módulo"""
+    
+    print("📝 CUESTIONARIO DE EVALUACIÓN - MÓDULO 3.2")
+    print("=" * 50)
+    
+    preguntas = {
+        1: {
+            'pregunta': '¿Cuál es la ventaja de usar context managers con SQLite?',
+            'opciones': [
+                'a) Mayor velocidad de consultas',
+                'b) Gestión automática de conexiones y transacciones',
+                'c) Mejor compatibilidad con Pandas',
+                'd) Reduce el tamaño de la base de datos'
+            ],
+            'respuesta_correcta': 'b',
+            'explicacion': 'Los context managers garantizan que las conexiones se cierren automáticamente y las transacciones se manejen correctamente.'
+        },
+        2: {
+            'pregunta': '¿Qué patrón de diseño implementamos para la gestión de sensores?',
+            'opciones': [
+                'a) Singleton',
+                'b) Factory', 
+                'c) DAO (Data Access Object)',
+                'd) Observer'
+            ],
+            'respuesta_correcta': 'c',
+            'explicacion': 'El patrón DAO encapsula la lógica de acceso a datos, separando la lógica de negocio de la persistencia.'
+        },
+        3: {
+            'pregunta': '¿Cuál es la principal ventaja de usar pd.read_sql_query()?',
+            'opciones': [
+                'a) Es más rápido que SQLite puro',
+                'b) Convierte automáticamente los datos a DataFrame para análisis',
+                'c) Usa menos memoria',
+                'd) Es más seguro contra inyección SQL'
+            ],
+            'respuesta_correcta': 'b',
+            'explicacion': 'pd.read_sql_query() convierte automáticamente los resultados SQL en DataFrames de Pandas, facilitando el análisis posterior.'
+        }
     }
     
-    sensor_id = sistema.registrar_sensor(sensor_temp)
+    print("✅ RESPUESTAS CORRECTAS:")
+    for num, data in preguntas.items():
+        print(f"\nPregunta {num}: {data['pregunta']}")
+        for opcion in data['opciones']:
+            marca = "✓" if opcion.startswith(data['respuesta_correcta']) else " "
+            print(f"  [{marca}] {opcion}")
+        print(f"💡 Explicación: {data['explicacion']}")
+
+def checklist_consolidacion():
+    """Checklist completo de consolidación del módulo"""
     
-    # Simulación de lecturas
-    import random
-    for _ in range(10):
-        valor = random.uniform(15, 85)  # Algunos valores fuera de rango
-        sistema.registrar_lectura(sensor_id, valor)
+    print("\n🎯 CHECKLIST DE CONSOLIDACIÓN - MÓDULO 3.2")
+    print("=" * 60)
     
-    # Obtener dashboard
-    dashboard = sistema.obtener_dashboard_data()
-    print("📊 Dashboard actualizado:", dashboard)
+    checklist_items = [
+        "✅ Configuración correcta del entorno (Python + SQLite + Pandas)",
+        "✅ Comprensión de conexiones y context managers",
+        "✅ Dominio de operaciones CRUD (Create, Read, Update, Delete)",
+        "✅ Implementación de esquemas industriales realistas",
+        "✅ Integración efectiva de SQLite con Pandas",
+        "✅ Análisis estadístico de datos industriales",
+        "✅ Sistema completo de gestión de alarmas",
+        "✅ Implementación del patrón DAO",
+        "✅ Optimización de consultas con índices",
+        "✅ Sistema de respaldos automáticos",
+        "✅ Generación de reportes automáticos",
+        "✅ Exportación de datos a Excel",
+        "✅ Detección de valores atípicos y anomalías",
+        "✅ Dashboard industrial integrado",
+        "✅ Manejo profesional de errores y excepciones",
+        "✅ Implementación de buenas prácticas de seguridad"
+    ]
     
-    # Generar reporte
-    reporte = sistema.generar_reporte_diario()
-    print("📋 Reporte diario generado:", reporte)
+    print("📋 CONOCIMIENTOS CONSOLIDADOS:")
+    for item in checklist_items:
+        print(f"  {item}")
+    
+    print(f"\n🏆 TOTAL OBJETIVOS COMPLETADOS: {len(checklist_items)}/16")
+    print("\n🎓 NIVEL DE COMPETENCIA: AVANZADO")
+    print("📈 PREPARACIÓN PARA MÓDULO 3.3: 100% LISTO")
+
+=================================================================
+10. FUNCIÓN PRINCIPAL DE DEMOSTRACIÓN
+=================================================================
+
+def main():
+    """Función principal que demuestra todos los conceptos del módulo"""
+    
+    print("🐍🗄️ MÓDULO 3.2: PYTHON + SQLITE - DEMOSTRACIÓN COMPLETA")
+    print("=" * 70)
+    
+    try:
+        # 1. Crear sistema de demostración
+        print("\n1️⃣ CREANDO SISTEMA DE DEMOSTRACIÓN...")
+        demo_rapida_sistema_industrial()
+        
+        # 2. Análisis con Pandas
+        print("\n2️⃣ ANÁLISIS CON PANDAS...")
+        df_datos = demo_pandas_sqlite()
+        
+        # 3. Generar reportes
+        print("\n3️⃣ GENERANDO REPORTES...")
+        reporte = generar_reporte_operacional()
+        archivo_reporte = exportar_reporte_excel(reporte)
+        
+        # 4. Ejecutar ejercicios
+        print("\n4️⃣ EJERCICIOS PRÁCTICOS...")
+        ejercicio_basico_conexion()
+        ejercicio_intermedio_pandas()
+        dashboard, reporte_dashboard = ejercicio_avanzado_dashboard()
+        
+        # 5. Evaluación
+        print("\n5️⃣ EVALUACIÓN Y CONSOLIDACIÓN...")
+        cuestionario_evaluacion()
+        checklist_consolidacion()
+        
+        print("\n" + "="*70)
+        print("🎉 ¡MÓDULO 3.2 COMPLETAMENTE DEMOSTRADO!")
+        print("="*70)
+        print("🚀 Siguiente etapa: Módulo 3.3 - ORM con SQLAlchemy")
+        print("📚 Ya tienes las bases sólidas para frameworks avanzados de ORM")
+        print("💪 ¡Excelente trabajo siguiendo la metodología de aprendizaje deliberado!")
+        
+    except Exception as e:
+        print(f"❌ Error en demostración: {e}")
+        print("🔧 Revisa la configuración del entorno y las dependencias")
+
+if __name__ == "__main__":
+    main()
+
+=================================================================
+🎓 CONCLUSIÓN DEL MÓDULO 3.2
+=================================================================
+
+"""
+¡FELICIDADES! Has completado exitosamente el Módulo 3.2: Python + SQLite.
+
+🏆 LOGROS ALCANZADOS:
+- Integración completa de Python con SQLite
+- Manejo profesional de conexiones y transacciones
+- Análisis híbrido con Pandas
+- Generación automática de reportes
+- Implementación de patrones de diseño para bases de datos
+- Sistema industrial completo funcional
+
+🚀 PREPARACIÓN PARA EL SIGUIENTE NIVEL:
+- Tienes las bases sólidas para ORM avanzados
+- Comprendes la integración SQL-Python
+- Dominas el análisis de datos industriales
+- Implementas buenas prácticas profesionales
+
+📈 PRÓXIMO MÓDULO: 3.3 - ORM con SQLAlchemy
+- Object-Relational Mapping avanzado
+- Modelos declarativos
+- Migraciones automáticas
+- Consultas complejas con ORM
+- Optimización de performance con ORM
+
+¡Continúa con esta excelente metodología de aprendizaje deliberado!
+"""
